@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>朱瑞博3200100218</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" type="text/css" href="./main.css">
+    </head>
+
+    <body>
+        <div id = "container" style="height:innerHeight-50;">
+            <script type="module">
+                
+                import * as THREE from "https://cdn.skypack.dev/three@0.136.0";
+
+                const container = document.getElementById( 'container' )
+
+                let scene = new THREE.Scene()
+                // 设置场景背景颜色
+                scene.background = new THREE.Color(0xeeeeee)
+
+                // 创建相机
+                let camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 1, 100)
+                // 设置相机位置
+                camera.position.set(0, -0.8, 3)
+
+                // 创建渲染器
+                let renderer = new THREE.WebGLRenderer()
+                // 设置渲染器大小
+                renderer.setSize(innerWidth - 20, innerHeight)
+                // 把渲染器加入到页面中
+
+                container.appendChild( renderer.domElement )
+                // 监听窗口大小变化事件
+                window.addEventListener("resize", event => {
+                    camera.aspect = innerWidth / innerHeight
+                    camera.updateProjectionMatrix()
+                    renderer.setSize(innerWidth - 20, innerHeight)
+                })
+                // 创建全局uniform
+                let gu = {
+                    time: { value: 0 }
+                }
+                // 创建点的大小数组和移动数组
+                let sizes = []
+                let shift = []
+
+                // 创建移动函数
+                let pushShift = () => {
+                    shift.push(
+                        Math.random() * Math.PI,
+                        Math.random() * Math.PI * 2,
+                        (Math.random() * 0.9 + 0.1) * Math.PI * 0.1,
+                        Math.random() * 0.9 + 0.1
+                    )
+                }
+
+                // 创建点的顶点数组（中间的球体）
+                let pts = new Array(100).fill().map(p => {
+                    // 每次遍历中，会向sizes数组中添加一个随机大小
+                    sizes.push(Math.random() * 2 + 2)
+                    // 调用pushShift()函数添加位置信息，并返回一个随机方向的THREE.Vector对象
+                    pushShift()
+                    return new THREE.Vector3().randomDirection().multiplyScalar(Math.random() * 1 + 1)
+                    //
+                })
+
+                // 生成一个点g，同时将点的大小和位置信息添加到sizes和shift数组中
+                let g = new THREE.BufferGeometry().setFromPoints(pts)
+                // 创建了一个缓冲几何体并设置sizes和shift属性
+                g.setAttribute("sizes", new THREE.Float32BufferAttribute(sizes, 1))
+                g.setAttribute("shift", new THREE.Float32BufferAttribute(shift, 4))
+                // 创建点材质
+                let m = new THREE.PointsMaterial({
+                    // 表示点的大小
+                    size: 0.07,
+                    // 设置材质为透明
+                    transparent: true,
+                    // 表示禁用深度测试，使点可以叠加
+                    depthTest: false,
+                    onBeforeCompile: shader => {
+                        shader.uniforms.time = gu.time
+                        // 首先，它为着色器设置了一个uniform变量time，该变量是在点材质中定义的，用来追踪时间
+                        // 然后它定义了两个attribute变量sizes和shift，这两个变量是在缓冲几何体中定义的，用来控制点的大小和移动
+                        // 最后使用replace方法来替换顶点着色器中的代码
+                        shader.vertexShader = `
+                        uniform float time;
+                        attribute float sizes;
+                        attribute vec4 shift;
+                        varying vec3 vColor;
+                        ${shader.vertexShader}
+                        `
+                            // 使用replace来替换着色器中的代码
+                            // 更新点的大小
+                            .replace(
+                                `gl_PointSize = size;`,
+                                `gl_PointSize = size * sizes;`
+                            )
+                            // 更新点的颜色
+                            .replace(
+                                `#include <color_vertex>`,
+                                `#include <color_vertex>
+                            float d = length(abs(position)/vec3(40.,10.,40));
+                            d=clamp(d,0.,1.);
+                            vColor = vec3(50.,50.,50.)/255.;`
+                            )
+                            // 记得加上分号
+                            // 更新点的移动
+                            .replace(
+                                `#include <begin_vertex>`,
+                                `#include <begin_vertex>
+                                    float t = time;
+                                    float moveT = mod(shift.x + shift.z * t,PI2);
+                                    float moveS = mod(shift.y + shift.z * t,PI2);
+                                    transformed += vec3(cos(moveS) * sin(moveT),cos(moveT),sin(moveS)*sin(moveT)) * shift.w;
+                                    `
+                            )
+                        // 修改片元着色器，用来让点的边缘更加圆滑
+
+                        // 首先，定义一个varying变量vColor，这个变量是在顶点着色器中定义的，用来传递点的颜色到片段着色器
+                        // 然后使用replace方法来替换片段着色器的代码
+                        
+                        shader.fragmentShader = `
+                            varying vec3 vColor;
+                            ${shader.fragmentShader}
+                        `
+                        .replace(
+                            `#include <clipping_planes_fragment>`,
+                            `#include <clipping_planes_fragment>
+                                float d = length(gl_PointCoord.xy - 0.5);
+                            `
+                        )
+                        .replace(
+                            // 记得加上空格
+                            `vec4 diffuseColor = vec4( diffuse, opacity );`,
+                            `vec4 diffuseColor = vec4( vColor, smoothstep(0.11, 0.1, d)/* * 0.5+0.5*/);`
+                        );
+                        
+                    }
+
+                })
+                // -------------------------------------------------------------
+                // 创建点云并将其添加到场景中，并设置渲染循环
+                let p = new THREE.Points(g, m)
+                // 旋转顺序为"ZYX"
+                p.rotation.order = "ZYX"
+                // 旋转角度 0.2
+                p.rotation.z = 0.1
+                // 把对象（p）添加到场景（scene）中
+                scene.add(p)
+                
+                //Create a PointLight and turn on shadows for the light
+            
+                const light = new THREE.PointLight( 0xffffff, 1, 100 );
+                light.position.set( 0, 5, 2 );
+                light.castShadow = true; // default false
+                scene.add( light );
+            
+                //Set up shadow properties for the light
+            
+                light.shadow.mapSize.width = 1024;
+                light.shadow.mapSize.height = 1024; 
+                light.shadow.camera.near = 0.5; 
+                light.shadow.camera.far = 500; 
+            
+                //ambient light
+            
+                const light1 = new THREE.AmbientLight( 0x404040 ); // soft white light
+                scene.add( light1 );
+    
+                //cube
+            
+                const geometry1 = new THREE.BoxGeometry( 0.4, 0.4, 0.4 );
+                const material1 = new THREE.MeshStandardMaterial( { color: 0x00ffff } );
+                const mesh = new THREE.Mesh( geometry1, material1 );
+                mesh.castShadow = true; 
+                mesh.receiveShadow = false; 
+                
+                scene.add( mesh );
+            
+                //poly egdes
+            
+                const verticesOfCube = [
+                    -1,-1,-1,    1,-1,-1,    1, 1,-1,    -1, 1,-1,
+                    -1,-1, 1,    1,-1, 1,    1, 1, 1,    -1, 1, 1,
+                ];
+                const indicesOfFaces = [
+                    2,1,0,    0,3,2,
+                    0,4,7,    7,3,0,
+                    0,1,5,    5,4,0,
+                    1,2,6,    6,5,1,
+                    2,3,7,    7,6,2,
+                    4,5,6,    6,7,4
+                ];
+    
+                const geometry2 = new THREE.PolyhedronGeometry( verticesOfCube, indicesOfFaces, 1, 1 );
+                const edges = new THREE.EdgesGeometry( geometry2 );
+                const line1 = new THREE.LineSegments( edges, new THREE.LineBasicMaterial( { color: 0x111111 } ) );
+                scene.add( line1 );
+            
+            
+                //cube edges
+            
+                const edges2 = new THREE.EdgesGeometry( geometry1 );
+                const line2 = new THREE.LineSegments( edges2, new THREE.LineBasicMaterial( { color: 0x000000 } ) );
+                scene.add( line2 );
+            
+                function animate() {
+                    requestAnimationFrame( animate );
+        
+                    mesh.rotation.x += 0.01;
+                    mesh.rotation.y += 0.01;
+                    line2.rotation.x += 0.01;
+                    line2.rotation.y += 0.01;
+        
+                    line1.rotation.x -= 0.01;
+                    line1.rotation.y += 0.01;
+
+                    gu.time.value  += 0.01;
+                    // 将对象（p）的旋转角度y设置为t*0.05
+                    p.rotation.y += 0.01
+        
+                    renderer.render( scene, camera );
+                }
+                animate();
+
+            </script>
+        </div>
+
+        <div class="header">
+            <div class="welcome" id="wel">
+                <form name="myForm">
+                    YOUR NAME: <br><br>
+                    <input list="names" id="fname">
+                    <datalist id="names">
+                        <option value="Option1">
+                        <option value="Option2">
+                        <option value="Option3">
+                        <option value="Option4">
+                    </datalist>
+                    <input type="submit" value="Submit" onclick = "welcomel()">
+                    <br/>
+                </form>
+            </div>
+        </div>
+        
+        <a  href="#start">
+            <img id="pageDown" src="https://p1.ssl.qhimgs1.com/sdr/400__/t01c763da4930a238db.jpg" width="50px">
+        </a>
+          
+
+        <div class="navbar" id="start">
+            <a href="#dh1">基本信息</a>
+            <a href="#dh2">专业技能</a>
+            <a href="#dh3">兴趣爱好</a>
+            <a class="right" href="#">回到顶部</a>
+        </div>
+
+        <div class="row">
+            <div class="side">
+                <div class = "sideContent">
+                    <h2>课程表</h2>
+                    <div class="fakeimg" style="height:600px;">
+                        <div class="grid-container">
+                            <div class="item1">数据可视化<br><br>A201</div>
+                            <div class="item2">乒乓球（初级<br><br>乒乓球房2</div>
+                            <div class="item3">交互设计<br><br>A201</div>  
+                            <div class="item4">品牌与包装设计II<br><br>A306</div>
+                            <div class="item5">展示策划与设计<br><br>田家炳515</div>
+                            <div class="item6">08：00<br><b>1</b></div>
+                            <div class="item7">08：50<br><b>2</b></div>
+                            <div class="item8">10：00<br><b>3</b></div>  
+                            <div class="item9">10：50<br><b>4</b></div>
+                            <div class="item10">11：40<br><b>5</b></div>
+                            <div class="item11">13：25<br><b>6</b></div>
+                            <div class="item12">14：15<br><b>7</b></div>
+                            <div class="item13">15：05<br><b>8</b></div>
+                            <div class="item14">16：15<br><b>9</b></div>
+                            <div class="item15">17：05<br><b>10</b></div>
+                            <div class="item16">18:50<br><b>11</b></div>
+                            <div class="item17">19:40<br><b>12</b></div>
+                            <div class="item18">20:30<br><b>13</b></div>
+                            <div class="item19">数据可视化<br>A201</div>
+                        </div>
+                    </div>
+                    <br>
+                </div>
+            </div>
+            <div class="main">
+                <br>
+                <a id="dh1" href="https://space.bilibili.com/364712643/dynamic?spm_id_from=333.999.0.0" target="_blank">
+                    <img class="bili" src="https://i0.hdslb.com/bfs/face/fe259c16596b88128c93e921b3a9074fef998ccb.jpg" style="width:100px; border-radius: 50%;">
+                </a>
+                
+                <h1>基本信息</h1>
+                <hr>
+                <h2>朱瑞博</h2>
+                <ul style="padding: 10px 80px;">
+                    <li>学号： 3200100218</li><br>
+                    <li>艺术与考古学院</li><br>
+                    <li>视觉传达设计2001</li><br>
+                    <li>17337735760</li><br>
+                    <li>浙江省杭州市西湖区西溪街道文三路232号浙江大学西溪校区北园</li>
+                </ul>
+                
+                <p id="dh2" style="height:60px;"></p>
+                <h1>专业技能</h1>
+                <hr>
+                <h2>shader</h2>
+                <div class="fakeimg" style="height:240px; margin: 20px;">
+                    <div class="fc">
+                        <img src="./assets/0001-0160.gif"> 
+                        <img src="./assets/0030-0110.gif"> 
+                        <img src="./assets/0040-0140.gif"> 
+                    </div>
+                    
+                </div>
+                <br>
+                <ul style="padding: 10px 80px;">
+                    <li>语言：C/C++， HTML/CSS，HLSL/CG</li><br>
+                    <li>方向：灯光、材质、渲染、特效</li>
+                </ul>
+                
+                <p id="dh3" style="height:60px;"></p>
+                <h1>兴趣爱好</h1>
+                <hr>
+                <h2>绘画</h2>
+                <div class="fakeimg" style="height:500px; overflow: hidden; margin: 20px;">
+                    <div class="fc">    
+                        <div id="slider-control" onclick="lastone()" style="float: left; transform:rotate(90deg);" >
+                            <img src="https://p1.ssl.qhimgs1.com/sdr/400__/t01c763da4930a238db.jpg" width="50px">
+                        </div>
+                        <div  class="img" >
+                            <img id="sw2" src="https://i0.hdslb.com/bfs/new_dyn/a71769a2dceaaf2a86fbb711c3ddc138364712643.jpg" width="880px" height="450px" >
+                        </div>
+                        <div id="slider-control" onclick="nextone()" style="float: right; transform:rotate(-90deg);">
+                            <img src="https://p1.ssl.qhimgs1.com/sdr/400__/t01c763da4930a238db.jpg" width="50px">
+                        </div>
+                    </div>  
+                </div>
+                <br>
+                <div class="fc"> 
+                    <div class="atom">
+                        <h2>图形学</h2>
+                        <div class="fakeimg" style="height:240px;">
+                            <p>
+                                <img src="https://i0.hdslb.com/bfs/album/468192514dec30e1ed7db1b169cedbd8c1d6f90f.png" width="350px">
+                            </p>
+                        </div>
+                    </div>
+                    <div class="atom">
+                        <h2>游戏制作</h2>
+                        <div class="fakeimg" style="height:240px;">
+                            <p style="margin: auto;">
+                                <img src="./assets/86E6FF.jpg" height="140px" >
+                                <br>
+                                <p>恐怖游戏</p>
+                            </p>
+                        </div>
+                    </div>
+                    <div class="atom">
+                        <h2>其他</h2>
+                        <div class="fakeimg" style="height:240px;">
+                            <p>
+                                <ul>
+                                    <li></li>
+                                    <li></li>
+                                    <li></li>
+                            </p>
+                        </div>
+                    </div>
+                    
+                </div>
+                
+                <p id="dh4" style="height:60px;"></p>
+                <h1>Q&A</h1>
+                <h2>QA环节</h2>
+                <div style="height:300px;">
+                </div>
+                <p>etc.</p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            THANKS FOR YOUR ATTENTION<br>
+            <br>
+            <a href="https://www.w3school.com.cn/" target="_blank">w3school</a><br>
+            <a href="https://www.runoob.com/" target="_blank">runoob</a><br>
+        </div>
+
+        <script>
+            function welcomel()
+            {
+                document.get
+                let x = document.getElementById( 'wel' );
+                let y = document.getElementById( 'fname').value;
+                x.innerHTML = "Hello, " + y + "!";
+            }
+            function myFunc1() {
+                let y = document.getElementsByClassName('grid-item item2');
+                y.innerHTML = "0"
+                console.log(1)
+            }
+           
+            let srcs=new Array();
+            srcs[0]="https://i0.hdslb.com/bfs/new_dyn/b5300a489127524658b0a0551888e70c364712643.png";
+            srcs[1]="https://i0.hdslb.com/bfs/new_dyn/29b2ea8253f4d7aa6adcb1bd88b7cb50364712643.jpg";
+            srcs[2]="https://i0.hdslb.com/bfs/new_dyn/a71769a2dceaaf2a86fbb711c3ddc138364712643.jpg";
+            srcs[3]="https://i0.hdslb.com/bfs/new_dyn/c55113eb71f354dda4fdb6532e16f7a2364712643.jpg";
+            srcs[4]="https://i0.hdslb.com/bfs/new_dyn/01479e5d832ca0df16a74cb140261d22364712643.jpg";
+            let i = 2;
+            function lastone()
+            {
+                let x = document.getElementById( 'sw2' );
+                if(--i < 0) i = 4;
+                x.src =  srcs[i];
+            }
+            function nextone()
+            {
+                let x = document.getElementById( 'sw2' );
+                if(++i > 4) i = 0; 
+                x.src =  srcs[i];
+            }
+
+        </script>
+
+    </body>
+</html>
